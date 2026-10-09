@@ -2,7 +2,6 @@
 #include "custom_distributions.h"
 #include "node_detail.h"
 #include "philox_engine.h"
-#include "reg_stack.h"
 #include <algorithm>
 #include <cstdint>
 #include <fitness.h>
@@ -21,36 +20,67 @@ namespace genetic {
 template <int MaxSize = MAX_STACK_SIZE>
 void execute_kernel(const program_t d_progs, const float *data, float *y_pred,
                     const uint64_t n_rows, const uint64_t n_progs) {
+  const uint64_t BLOCK_SIZE = 64;
 #pragma omp parallel for schedule(dynamic)
   for (uint64_t pid = 0; pid < n_progs; ++pid) {
-    for (uint64_t row_id = 0; row_id < n_rows; ++row_id) {
+    for (uint64_t row_begin = 0; row_begin < n_rows;
+         row_begin += BLOCK_SIZE) {
+      alignas(BLOCK_SIZE) float eval_stack[MaxSize][BLOCK_SIZE];
+      uint64_t rows = std::min(BLOCK_SIZE, n_rows - row_begin);
+      int elements = 0;
+      program_t curr_p = d_progs + pid;
 
-      stack<float, MaxSize> eval_stack;
-      program_t curr_p = d_progs + pid; // Current program
-
-      int end = curr_p->len - 1;
-      node *curr_node = curr_p->nodes + end;
-
-      float res = 0.0f;
-
-      while (end >= 0) {
-        auto type = curr_node->t;
+      for (int end = curr_p->len - 1; end >= 0; --end) {
+        node *curr_node = curr_p->nodes + end;
+        node::type type = curr_node->t;
         if (type == node::type::variable) {
-          res = data[(n_rows * curr_node->u.fid) + row_id];
+          float *out = eval_stack[elements++];
+          const float *in = data + n_rows * curr_node->u.fid + row_begin;
+          for (uint64_t row = 0; row < rows; ++row)
+            out[row] = in[row];
         } else if (type == node::type::constant) {
-          res = curr_node->u.val;
+          float *out = eval_stack[elements++];
+          for (uint64_t row = 0; row < rows; ++row)
+            out[row] = curr_node->u.val;
+        } else if (type <= node::type::binary_end) {
+          float *in0 = eval_stack[--elements];
+          float *in1 = eval_stack[--elements];
+          float *out = eval_stack[elements++];
+          if (type == node::type::add) {
+            for (uint64_t row = 0; row < rows; ++row)
+              out[row] = in0[row] + in1[row];
+          } else if (type == node::type::sub) {
+            for (uint64_t row = 0; row < rows; ++row)
+              out[row] = in0[row] - in1[row];
+          } else if (type == node::type::mul) {
+            for (uint64_t row = 0; row < rows; ++row)
+              out[row] = in0[row] * in1[row];
+          } else {
+            for (uint64_t row = 0; row < rows; ++row)
+              out[row] = detail::evaluate_function(type, in0[row], in1[row]);
+          }
         } else {
-          float in0 = eval_stack.pop();
-          float in1 = type <= node::type::binary_end ? eval_stack.pop() : 0.0f;
-          res = detail::evaluate_function(type, in0, in1);
+          float *in = eval_stack[elements - 1];
+          if (type == node::type::abs) {
+            for (uint64_t row = 0; row < rows; ++row)
+              in[row] = fabsf(in[row]);
+          } else if (type == node::type::sq) {
+            for (uint64_t row = 0; row < rows; ++row)
+              in[row] *= in[row];
+          } else if (type == node::type::sqrt) {
+            for (uint64_t row = 0; row < rows; ++row)
+              in[row] = sqrtf(fabsf(in[row]));
+          } else {
+            for (uint64_t row = 0; row < rows; ++row)
+              in[row] = detail::evaluate_function(type, in[row], 0.0f);
+          }
         }
-        eval_stack.push(res);
-        curr_node--;
-        end--;
       }
 
-      // Outputs stored in col-major format
-      y_pred[pid * n_rows + row_id] = eval_stack.pop();
+      float *out = y_pred + pid * n_rows + row_begin;
+      float *result = eval_stack[--elements];
+      for (uint64_t row = 0; row < rows; ++row)
+        out[row] = result[row];
     }
   }
 }
