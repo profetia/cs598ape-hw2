@@ -31,16 +31,18 @@ void execute_kernel(const program_t d_progs, const float *data, float *y_pred,
       node *curr_node = curr_p->nodes + end;
 
       float res = 0.0f;
-      float in[2] = {0.0f, 0.0f};
 
       while (end >= 0) {
-        if (detail::is_nonterminal(curr_node->t)) {
-          int ar = detail::arity(curr_node->t);
-          in[0] = eval_stack.pop(); // Min arity of function is 1
-          if (ar > 1)
-            in[1] = eval_stack.pop();
+        auto type = curr_node->t;
+        if (type == node::type::variable) {
+          res = data[(n_rows * curr_node->u.fid) + row_id];
+        } else if (type == node::type::constant) {
+          res = curr_node->u.val;
+        } else {
+          float in0 = eval_stack.pop();
+          float in1 = type <= node::type::binary_end ? eval_stack.pop() : 0.0f;
+          res = detail::evaluate_function(type, in0, in1);
         }
-        res = detail::evaluate_node(*curr_node, data, n_rows, row_id, in);
         eval_stack.push(res);
         curr_node--;
         end--;
