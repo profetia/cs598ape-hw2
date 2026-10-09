@@ -26,6 +26,10 @@ def docker(worktree, command):
 parser = argparse.ArgumentParser()
 parser.add_argument("--commit")
 parser.add_argument("--op", choices=ops, default="diabetes")
+parser.add_argument(
+    "--events", nargs="+", choices=("cycles", "instructions"),
+    default=("cycles", "instructions")
+)
 parser.add_argument("--freq", type=int)
 args = parser.parse_args()
 
@@ -61,31 +65,38 @@ subprocess.run(
     cwd=worktree, check=True
 )
 
-(worktree / "profile").mkdir()
 docker(worktree, ["make", "clean"])
 docker(worktree, ["make", "-j4"])
-perf = ["perf", "record", "-e", "cpu-clock:u"]
-if args.freq:
-    perf += ["-F", str(args.freq)]
-perf += ["--call-graph", "dwarf", "-o", "profile/perf.data", "--"]
-docker(worktree, perf + ops[args.op])
-docker(worktree, [
-    "bash", "-c",
-    "perf script -i profile/perf.data > profile/perf.txt"
-])
-docker(worktree, [
-    "bash", "-c",
-    "FlameGraph/stackcollapse-perf.pl profile/perf.txt "
-    "> profile/perf.folded"
-])
-docker(worktree, [
-    "bash", "-c",
-    "FlameGraph/flamegraph.pl --countname samples profile/perf.folded "
-    "> profile/flamegraph.svg"
-])
-docker(worktree, [
-    "bash", "-c",
-    "perf report --stdio -i profile/perf.data > profile/report.txt"
-])
 
-print("\n" + str(worktree / "profile" / "flamegraph.svg"))
+outputs = []
+for event in args.events:
+    profile_dir = worktree / "profile" / event
+    profile_dir.mkdir(parents=True)
+    relative_dir = f"profile/{event}"
+    perf = [
+        "perf", "record", "-e", f"{event}:u", "-F", str(args.freq),
+        "--call-graph", "dwarf", "-o", f"{relative_dir}/perf.data", "--"
+    ]
+    docker(worktree, perf + ops[args.op])
+    docker(worktree, [
+        "bash", "-c",
+        f"perf script -i {relative_dir}/perf.data > {relative_dir}/perf.txt"
+    ])
+    docker(worktree, [
+        "bash", "-c",
+        f"FlameGraph/stackcollapse-perf.pl {relative_dir}/perf.txt "
+        f"> {relative_dir}/perf.folded"
+    ])
+    docker(worktree, [
+        "bash", "-c",
+        f"FlameGraph/flamegraph.pl --countname samples "
+        f"{relative_dir}/perf.folded > {relative_dir}/flamegraph.svg"
+    ])
+    docker(worktree, [
+        "bash", "-c",
+        f"perf report --stdio -i {relative_dir}/perf.data "
+        f"> {relative_dir}/report.txt"
+    ])
+    outputs.append(profile_dir / "flamegraph.svg")
+
+print("\n" + "\n".join(str(output) for output in outputs))
