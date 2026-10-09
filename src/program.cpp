@@ -55,6 +55,17 @@ void execute_kernel(const program_t d_progs, const float *data, float *y_pred,
           } else if (type == node::type::mul) {
             for (uint64_t row = 0; row < rows; ++row)
               out[row] = in0[row] * in1[row];
+          } else if (type == node::type::fdim) {
+            for (uint64_t row = 0; row < rows; ++row) {
+              float a = in0[row];
+              float b = in1[row];
+              if (a > b)
+                out[row] = a - b;
+              else if (a != a || b != b)
+                out[row] = a + b;
+              else
+                out[row] = 0.0f;
+            }
           } else {
             for (uint64_t row = 0; row < rows; ++row)
               out[row] = detail::evaluate_function(type, in0[row], in1[row]);
@@ -64,6 +75,17 @@ void execute_kernel(const program_t d_progs, const float *data, float *y_pred,
           if (type == node::type::abs) {
             for (uint64_t row = 0; row < rows; ++row)
               in[row] = fabsf(in[row]);
+          } else if (type == node::type::cos) {
+            for (uint64_t row = 0; row < rows; ++row)
+              in[row] = cosf(in[row]);
+          } else if (type == node::type::log) {
+            for (uint64_t row = 0; row < rows; ++row) {
+              float value = fabsf(in[row]);
+              in[row] = value < detail::MIN_VAL ? 0.0f : logf(value);
+            }
+          } else if (type == node::type::sin) {
+            for (uint64_t row = 0; row < rows; ++row)
+              in[row] = sinf(in[row]);
           } else if (type == node::type::sq) {
             for (uint64_t row = 0; row < rows; ++row)
               in[row] *= in[row];

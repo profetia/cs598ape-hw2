@@ -1,5 +1,5 @@
 CXX := clang++
-CXXFLAGS := -std=c++17 -Wall -Wextra -I include -I. -O3 -march=native -flto -fopenmp
+CXXFLAGS := -std=c++17 -Wall -Wextra -I include -I. -O3 -march=native -flto -fopenmp -fveclib=libmvec -fno-math-errno
 
 # Directories
 SRC_DIR := src
