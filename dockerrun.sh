@@ -1,5 +1,5 @@
-#!/bin/sh
-set -eu
+#!/bin/bash
 
-IMAGE=${1:-vim/598ape}
-docker run -it --security-opt seccomp=unconfined -v "$(pwd)":/host "$IMAGE" /bin/bash
+docker run --rm -u "$(id -u):$(id -g)" --cap-add PERFMON \
+  --security-opt seccomp=unconfined -v "$PWD:/host" -w /host \
+  "$USER/598ape" "$@"

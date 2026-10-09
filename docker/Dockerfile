@@ -23,4 +23,7 @@ RUN racket -e '(require racket/draw) (unless (send (make-bitmap 2 2) save-file "
     && test -s /tmp/racket-smoke.png \
     && rm /tmp/racket-smoke.png
 
+RUN setcap cap_perfmon=ep /usr/lib/linux-tools-6.8.0-146/perf
+
+ENV PATH="/usr/lib/linux-tools/6.8.0-146-generic:${PATH}"
 ENV DEBIAN_FRONTEND=
