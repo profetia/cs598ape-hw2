@@ -38,7 +38,7 @@ struct program {
    *
    * @param src
    */
-  explicit program(const program &src);
+  program(const program &src);
 
   /**
    * @brief assignment operator

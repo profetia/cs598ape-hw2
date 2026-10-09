@@ -184,7 +184,7 @@ float accuracy(const std::vector<float> &y_true,
 
 using namespace genetic;
 
-void insertionSortPrograms(genetic::program *programs, int size) {
+void sortPrograms(genetic::program *programs, int size) {
   // set any nan values to +inf
   for (int i = 0; i < size; ++i) {
     if (std::isnan(programs[i].raw_fitness_)) {
@@ -192,17 +192,10 @@ void insertionSortPrograms(genetic::program *programs, int size) {
     }
   }
 
-  // do insertion sort
-  for (int i = 1; i < size; i++) {
-    genetic::program key(programs[i]);
-    int j = i - 1;
-
-    while (j >= 0 && (programs[j].raw_fitness_ > key.raw_fitness_)) {
-      programs[j + 1] = programs[j];
-      j--;
-    }
-    programs[j + 1] = key;
-  }
+  std::sort(programs, programs + size,
+            [](const genetic::program &a, const genetic::program &b) {
+              return a.raw_fitness_ < b.raw_fitness_;
+            });
 }
 
 void run_symbolic_regression(const std::string &dataset_file) {
@@ -295,7 +288,7 @@ void run_symbolic_regression(const std::string &dataset_file) {
   // }
 
   // Predict on top 2 candidates
-  insertionSortPrograms(final_programs, params.population_size);
+  sortPrograms(final_programs, params.population_size);
 
   std::vector<float> y_pred1(X_test.size());
   genetic::symRegPredict(X_test_flat.data(), X_test.size(), &final_programs[0],
@@ -440,7 +433,7 @@ void run_symbolic_classification(const std::string &dataset_file) {
   // }
 
   // Predict classes for best 2 programs acc to training
-  insertionSortPrograms(final_programs, params.population_size);
+  sortPrograms(final_programs, params.population_size);
   std::vector<float> y_pred1(X_test.size());
   genetic::symClfPredict(X_test_flat.data(), X_test.size(), params,
                          &final_programs[0], y_pred1.data());
@@ -595,7 +588,7 @@ void run_symbolic_reconstruction(const std::string &png_file, int K) {
       genetic::symFit(X_train_flat.data(), y_train.data(),
                       sample_weights.data(), X_train.size(),
                       params.num_features, params, final_programs, history);
-      insertionSortPrograms(final_programs, params.population_size);
+      sortPrograms(final_programs, params.population_size);
       genetic::program_t best_program = &final_programs[0];
 
       std::vector<float> predictions(X_test.size());
