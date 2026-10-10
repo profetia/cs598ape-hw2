@@ -18,92 +18,98 @@ namespace genetic {
  * is stored in column major format.
  */
 template <int MaxSize = MAX_STACK_SIZE>
-void execute_kernel(const program_t d_progs, const float *data, float *y_pred,
-                    const uint64_t n_rows, const uint64_t n_progs) {
+void execute_program_kernel(const program_t curr_p, const float *data,
+                            float *y_pred, const uint64_t n_rows) {
   const uint64_t BLOCK_SIZE = 64;
-#pragma omp parallel for schedule(dynamic)
-  for (uint64_t pid = 0; pid < n_progs; ++pid) {
-    for (uint64_t row_begin = 0; row_begin < n_rows;
-         row_begin += BLOCK_SIZE) {
-      alignas(BLOCK_SIZE) float eval_stack[MaxSize][BLOCK_SIZE];
-      uint64_t rows = std::min(BLOCK_SIZE, n_rows - row_begin);
-      int elements = 0;
-      program_t curr_p = d_progs + pid;
+  for (uint64_t row_begin = 0; row_begin < n_rows;
+       row_begin += BLOCK_SIZE) {
+    alignas(BLOCK_SIZE) float eval_stack[MaxSize][BLOCK_SIZE];
+    uint64_t rows = std::min(BLOCK_SIZE, n_rows - row_begin);
+    int elements = 0;
 
-      for (int end = curr_p->len - 1; end >= 0; --end) {
-        node *curr_node = curr_p->nodes + end;
-        node::type type = curr_node->t;
-        if (type == node::type::variable) {
-          float *out = eval_stack[elements++];
-          const float *in = data + n_rows * curr_node->u.fid + row_begin;
+    for (int end = curr_p->len - 1; end >= 0; --end) {
+      node *curr_node = curr_p->nodes + end;
+      node::type type = curr_node->t;
+      if (type == node::type::variable) {
+        float *out = eval_stack[elements++];
+        const float *in = data + n_rows * curr_node->u.fid + row_begin;
+        for (uint64_t row = 0; row < rows; ++row)
+          out[row] = in[row];
+      } else if (type == node::type::constant) {
+        float *out = eval_stack[elements++];
+        for (uint64_t row = 0; row < rows; ++row)
+          out[row] = curr_node->u.val;
+      } else if (type <= node::type::binary_end) {
+        float *in0 = eval_stack[--elements];
+        float *in1 = eval_stack[--elements];
+        float *out = eval_stack[elements++];
+        if (type == node::type::add) {
           for (uint64_t row = 0; row < rows; ++row)
-            out[row] = in[row];
-        } else if (type == node::type::constant) {
-          float *out = eval_stack[elements++];
+            out[row] = in0[row] + in1[row];
+        } else if (type == node::type::sub) {
           for (uint64_t row = 0; row < rows; ++row)
-            out[row] = curr_node->u.val;
-        } else if (type <= node::type::binary_end) {
-          float *in0 = eval_stack[--elements];
-          float *in1 = eval_stack[--elements];
-          float *out = eval_stack[elements++];
-          if (type == node::type::add) {
-            for (uint64_t row = 0; row < rows; ++row)
-              out[row] = in0[row] + in1[row];
-          } else if (type == node::type::sub) {
-            for (uint64_t row = 0; row < rows; ++row)
-              out[row] = in0[row] - in1[row];
-          } else if (type == node::type::mul) {
-            for (uint64_t row = 0; row < rows; ++row)
-              out[row] = in0[row] * in1[row];
-          } else if (type == node::type::fdim) {
-            for (uint64_t row = 0; row < rows; ++row) {
-              float a = in0[row];
-              float b = in1[row];
-              if (a > b)
-                out[row] = a - b;
-              else if (a != a || b != b)
-                out[row] = a + b;
-              else
-                out[row] = 0.0f;
-            }
-          } else {
-            for (uint64_t row = 0; row < rows; ++row)
-              out[row] = detail::evaluate_function(type, in0[row], in1[row]);
+            out[row] = in0[row] - in1[row];
+        } else if (type == node::type::mul) {
+          for (uint64_t row = 0; row < rows; ++row)
+            out[row] = in0[row] * in1[row];
+        } else if (type == node::type::fdim) {
+          for (uint64_t row = 0; row < rows; ++row) {
+            float a = in0[row];
+            float b = in1[row];
+            if (a > b)
+              out[row] = a - b;
+            else if (a != a || b != b)
+              out[row] = a + b;
+            else
+              out[row] = 0.0f;
           }
         } else {
-          float *in = eval_stack[elements - 1];
-          if (type == node::type::abs) {
-            for (uint64_t row = 0; row < rows; ++row)
-              in[row] = fabsf(in[row]);
-          } else if (type == node::type::cos) {
-            for (uint64_t row = 0; row < rows; ++row)
-              in[row] = cosf(in[row]);
-          } else if (type == node::type::log) {
-            for (uint64_t row = 0; row < rows; ++row) {
-              float value = fabsf(in[row]);
-              in[row] = value < detail::MIN_VAL ? 0.0f : logf(value);
-            }
-          } else if (type == node::type::sin) {
-            for (uint64_t row = 0; row < rows; ++row)
-              in[row] = sinf(in[row]);
-          } else if (type == node::type::sq) {
-            for (uint64_t row = 0; row < rows; ++row)
-              in[row] *= in[row];
-          } else if (type == node::type::sqrt) {
-            for (uint64_t row = 0; row < rows; ++row)
-              in[row] = sqrtf(fabsf(in[row]));
-          } else {
-            for (uint64_t row = 0; row < rows; ++row)
-              in[row] = detail::evaluate_function(type, in[row], 0.0f);
+          for (uint64_t row = 0; row < rows; ++row)
+            out[row] = detail::evaluate_function(type, in0[row], in1[row]);
+        }
+      } else {
+        float *in = eval_stack[elements - 1];
+        if (type == node::type::abs) {
+          for (uint64_t row = 0; row < rows; ++row)
+            in[row] = fabsf(in[row]);
+        } else if (type == node::type::cos) {
+          for (uint64_t row = 0; row < rows; ++row)
+            in[row] = cosf(in[row]);
+        } else if (type == node::type::log) {
+          for (uint64_t row = 0; row < rows; ++row) {
+            float value = fabsf(in[row]);
+            in[row] = value < detail::MIN_VAL ? 0.0f : logf(value);
           }
+        } else if (type == node::type::sin) {
+          for (uint64_t row = 0; row < rows; ++row)
+            in[row] = sinf(in[row]);
+        } else if (type == node::type::sq) {
+          for (uint64_t row = 0; row < rows; ++row)
+            in[row] *= in[row];
+        } else if (type == node::type::sqrt) {
+          for (uint64_t row = 0; row < rows; ++row)
+            in[row] = sqrtf(fabsf(in[row]));
+        } else {
+          for (uint64_t row = 0; row < rows; ++row)
+            in[row] = detail::evaluate_function(type, in[row], 0.0f);
         }
       }
-
-      float *out = y_pred + pid * n_rows + row_begin;
-      float *result = eval_stack[--elements];
-      for (uint64_t row = 0; row < rows; ++row)
-        out[row] = result[row];
     }
+
+    float *out = y_pred + row_begin;
+    float *result = eval_stack[--elements];
+    for (uint64_t row = 0; row < rows; ++row)
+      out[row] = result[row];
+  }
+}
+
+template <int MaxSize = MAX_STACK_SIZE>
+void execute_kernel(const program_t d_progs, const float *data, float *y_pred,
+                    const uint64_t n_rows, const uint64_t n_progs) {
+#pragma omp parallel for schedule(dynamic)
+  for (uint64_t pid = 0; pid < n_progs; ++pid) {
+    execute_program_kernel<MaxSize>(d_progs + pid, data,
+                                    y_pred + pid * n_rows, n_rows);
   }
 }
 
@@ -156,6 +162,43 @@ void compute_metric(int n_rows, int n_progs, const float *y,
   }
 }
 
+void compute_program_metric(int n_rows, const float *y, const float *y_pred,
+                            const float *w, float *score, const param &params,
+                            float weight_sum, const std::vector<float> &scale,
+                            std::vector<float> &error) {
+  float N = static_cast<float>(n_rows);
+
+  if (params.metric == metric_t::mse || params.metric == metric_t::rmse) {
+    for (int row = 0; row < n_rows; ++row) {
+      float difference = y_pred[row] - y[row];
+      error[row] = N * w[row] * difference * difference / weight_sum;
+    }
+
+    float loss = 0.0f;
+    for (int row = 0; row < n_rows; ++row)
+      loss += error[row] / N;
+    *score = params.metric == metric_t::rmse ? sqrtf(loss) : loss;
+  } else if (params.metric == metric_t::logloss) {
+    float loss = 0.0f;
+    for (int row = 0; row < n_rows; ++row) {
+      float prediction = y_pred[row];
+      float log_sigmoid;
+      if (prediction < -33.3f)
+        log_sigmoid = prediction;
+      else if (prediction <= -18.0f)
+        log_sigmoid = prediction - expf(prediction);
+      else if (prediction <= 37.0f)
+        log_sigmoid = -log1pf(expf(-prediction));
+      else
+        log_sigmoid = -expf(-prediction);
+      loss += ((1.0f - y[row]) * prediction - log_sigmoid) * scale[row] / N;
+    }
+    *score = loss;
+  } else {
+    compute_metric(n_rows, 1, y, y_pred, w, score, params);
+  }
+}
+
 void execute(const program_t &d_progs, const int n_rows, const int n_progs,
              const float *data, float *y_pred) {
   execute_kernel(d_progs, data, y_pred, static_cast<uint64_t>(n_rows),
@@ -178,13 +221,27 @@ void find_batched_fitness(int n_progs, program_t d_progs, float *score,
                           const param &params, const int n_rows,
                           const float *data, const float *y,
                           const float *sample_weights) {
+  float N = static_cast<float>(n_rows);
+  float weight_sum = 0.0f;
+  for (int row = 0; row < n_rows; ++row)
+    weight_sum += sample_weights[row];
 
-  std::vector<float> y_pred((uint64_t)n_rows * (uint64_t)n_progs);
-  execute(d_progs, n_rows, n_progs, data, y_pred.data());
+  std::vector<float> scale(n_rows);
+  for (int row = 0; row < n_rows; ++row)
+    scale[row] = N * sample_weights[row] / weight_sum;
 
-  // Compute error
-  compute_metric(n_rows, n_progs, y, y_pred.data(), sample_weights, score,
-                 params);
+#pragma omp parallel
+  {
+    std::vector<float> y_pred(n_rows);
+    std::vector<float> error(n_rows);
+
+#pragma omp for schedule(dynamic)
+    for (int pid = 0; pid < n_progs; ++pid) {
+      execute_program_kernel(d_progs + pid, data, y_pred.data(), n_rows);
+      compute_program_metric(n_rows, y, y_pred.data(), sample_weights,
+                             score + pid, params, weight_sum, scale, error);
+    }
+  }
 }
 
 void set_fitness(program &h_prog, const param &params, const int n_rows,
