@@ -16,6 +16,15 @@ RUN update-alternatives --install /usr/bin/clang clang /usr/bin/clang-19 10 --sl
     && update-alternatives --install /usr/bin/lld lld /usr/bin/lld-19 10 \
     && update-alternatives --install /usr/bin/llvm-symbolizer llvm-symbolizer /usr/bin/llvm-symbolizer-19 10
 
+RUN curl -fsSL https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+        | gpg --dearmor -o /usr/share/keyrings/oneapi-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
+        > /etc/apt/sources.list.d/oneAPI.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends intel-oneapi-compiler-dpcpp-cpp \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN ln -s /usr/bin/convert /usr/bin/magick
 
 # Verify that racket/draw can render PNGs without a display server.
@@ -26,4 +35,5 @@ RUN racket -e '(require racket/draw) (unless (send (make-bitmap 2 2) save-file "
 RUN setcap cap_perfmon=ep /usr/lib/linux-tools-6.8.0-146/perf
 
 ENV PATH="/usr/lib/linux-tools/6.8.0-146-generic:${PATH}"
+ENV PATH="/opt/intel/oneapi/compiler/latest/bin:${PATH}"
 ENV DEBIAN_FRONTEND=
