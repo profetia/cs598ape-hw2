@@ -278,14 +278,17 @@ void rootMeanSquareError(const uint64_t n_samples, const uint64_t n_progs,
 template <typename math_t = float>
 void logLoss(const uint64_t n_samples, const uint64_t n_progs, const math_t *Y,
              const math_t *Y_pred, const math_t *W, math_t *out) {
-  // Logistic error per sample
-  std::vector<math_t> error(n_samples * n_progs);
   math_t N = (math_t)n_samples;
 
   // Weight Sum
   math_t WS = static_cast<math_t>(0);
   for (uint64_t i = 0; i < n_samples; ++i) {
     WS += W[i];
+  }
+
+  std::vector<math_t> scale(n_samples);
+  for (uint64_t i = 0; i < n_samples; ++i) {
+    scale[i] = N * W[i] / WS;
   }
 
   // Compute logistic loss as described in
@@ -298,11 +301,11 @@ void logLoss(const uint64_t n_samples, const uint64_t n_progs, const math_t *Y,
 
 #pragma omp parallel for
   for (uint64_t pid = 0; pid < n_progs; ++pid) {
+    math_t loss = 0;
     for (uint64_t i = 0; i < n_samples; ++i) {
       math_t logsig;
       math_t yp = Y_pred[pid * n_samples + i];
       math_t y = Y[i];
-      math_t w = W[i];
       if (yp < -33.3)
         logsig = yp;
       else if (yp <= -18)
@@ -311,13 +314,10 @@ void logLoss(const uint64_t n_samples, const uint64_t n_progs, const math_t *Y,
         logsig = -log1pf(expf(-yp));
       else
         logsig = -expf(-yp);
-      error[pid * n_samples + i] = ((1 - y) * yp - logsig) * (N * w / WS);
+      math_t error = ((1 - y) * yp - logsig) * scale[i];
+      loss += error / N;
     }
-
-    out[pid] = static_cast<math_t>(0);
-    for (uint64_t i = 0; i < n_samples; ++i) {
-      out[pid] += error[pid * n_samples + i] / N;
-    }
+    out[pid] = loss;
   }
 }
 
